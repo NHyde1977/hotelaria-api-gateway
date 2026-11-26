@@ -13,6 +13,12 @@ function somenteProprioUsuario(req, res, next) {
 }
 
 async function possuiReserva(req, reservaId) {
+    if (
+    typeof reservaId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reservaId)
+  ) {
+    return false;
+  }
   if (ehAdmin(req)) {
     return true;
   }

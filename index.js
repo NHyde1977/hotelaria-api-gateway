@@ -20,6 +20,22 @@ const {
 const app = express();
 const port = process.env.PORT || 3005;
 
+// Validacao global dos caminhos das requisicoes
+app.use((req, res, next) => {
+  const caminho = req.originalUrl.split('?')[0];
+
+  if (
+    !/^\/[a-zA-Z0-9/_-]*$/.test(caminho) ||
+    caminho.includes('//')
+  ) {
+    return res.status(400).json({
+      message: 'Caminho da requisicao invalido.'
+    });
+  }
+
+  next();
+});
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -51,6 +67,10 @@ function liberarProxyQuartos(req, res, next) {
 }
 
 function validarIdNumerico(req, res, next) {
+  if (req.quartoAutorizado === true) {
+    return next('route');
+  }
+
   const ids = Object.values(req.params);
 
   if (!ids.every(id => /^[1-9]\d*$/.test(id))) {
@@ -259,9 +279,22 @@ app.use(
 );
 
 // Autenticacao centralizada
+
+function liberarProxyAuth(req, res, next) {
+  req.authAutorizado = true;
+  next();
+}
+
+app.post('/auth/login',
+  liberarProxyAuth
+);
+
+// Microsservico de Autenticacao
 app.use(
   createProxyMiddleware({
-    pathFilter: '/auth',
+    pathFilter: (pathname, req) => {
+      return req.authAutorizado === true;
+    },
     target: process.env.USUARIOS_SERVICE_URL,
     changeOrigin: true,
     pathRewrite: {
@@ -350,6 +383,40 @@ app.get('/reservas',
   liberarProxyReservas
 );
 
+// Consulta das reservas do proprio usuario
+app.get('/reservas/minhas',
+  autenticar,
+  autorizar('ADMIN', 'HOSPEDE'),
+  async (req, res) => {
+    try {
+      const resposta = await fetch(
+        `${process.env.RESERVAS_SERVICE_URL}/reservas`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+
+      if (!resposta.ok) {
+        throw new Error('Falha na consulta de reservas.');
+      }
+
+      const reservas = await resposta.json();
+
+      const minhasReservas = reservas.filter(reserva =>
+        reserva.hospede_reserva?.some(hospede =>
+          hospede.usuario_id === req.usuario.sub &&
+          hospede.tipo === 'TITULAR'
+        )
+      );
+
+      return res.json(minhasReservas);
+
+    } catch (error) {
+      return res.status(503).json({
+        message: 'Nao foi possivel consultar suas reservas.'
+      });
+    }
+  }
+);
+
 app.get('/reservas/:id',
   autenticar,
   autorizar('ADMIN', 'HOSPEDE'),
@@ -411,6 +478,13 @@ app.use(
     }
   })
 );
+
+// Autorizacao das rotas de Servicos Extras
+
+function liberarProxyExtras(req, res, next) {
+  req.extrasAutorizado = true;
+  next();
+}
 
 // Catalogo de servicos
 
