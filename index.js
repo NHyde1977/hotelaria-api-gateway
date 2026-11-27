@@ -88,6 +88,21 @@ app.get('/quartos',
   liberarProxyQuartos
 );
 
+app.get('/quartos/disponiveis',
+  autenticar,
+  autorizar('ADMIN'),
+  (req, res, next) => {
+    if (!process.env.INTERNAL_API_KEY) {
+      return res.status(503).json({
+        message: 'Chave interna nao configurada.'
+      });
+    }
+
+    req.consultaInternaQuartosAutorizada = true;
+    liberarProxyQuartos(req, res, next);
+  }
+);
+
 app.get('/quartos/:id',
   validarIdNumerico,
   liberarProxyQuartos
@@ -188,8 +203,15 @@ app.use(
     target: process.env.QUARTOS_SERVICE_URL,
     changeOrigin: true,
     on: {
-      proxyReq: (proxyReq) => {
+      proxyReq: (proxyReq, req) => {
         proxyReq.removeHeader('x-internal-api-key');
+
+        if (req.consultaInternaQuartosAutorizada === true) {
+          proxyReq.setHeader(
+            'x-internal-api-key',
+            process.env.INTERNAL_API_KEY
+          );
+        }
       }
     }
   })
